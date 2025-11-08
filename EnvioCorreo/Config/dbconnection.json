@@ -1,0 +1,6 @@
+{
+  "ConnectionStrings": {
+    //"UniversidadConnection": "Server=DESKTOP-KSJLU0B\\SQLNET;Database=GestionMatriculaDB;Trusted_Connection=True;MultipleActiveResultSets=true;Encrypt=False"
+    "UniversidadConnection": "Server=DESKTOP-KSJLU0B\\SQLNET;Database=GestionMatriculaDB;User Id=sa;Password=uni;TrustServerCertificate=true;"
+  }
+}
