@@ -1,0 +1,14 @@
+
+services:
+  app:
+    image: envio_correo_app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: envio_correo_app
+    ports:
+      - "7069:8080"
+    environment:
+      - ConnectionStrings__UniversidadConnection=Server=host.docker.internal\SQLNET;Database=GestionMatriculaDB;User Id=sa;Password=uni;TrustServerCertificate=true;MultipleActiveResultSets=True
+    
+    restart: always
