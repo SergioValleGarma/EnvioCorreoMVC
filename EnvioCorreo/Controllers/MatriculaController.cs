@@ -11,13 +11,17 @@ namespace EnvioCorreo.Controllers
     public class MatriculaController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IMessageQueueService _messageQueueService; // ✅ Solo RabbitMQ
+        private readonly IMessageQueueService _messageQueueService;
+        private readonly IKafkaProducerService _kafkaProducerService;
 
-        // ❌ REMOVEMOS IEmailService del constructor - ahora lo maneja el consumidor
-        public MatriculaController(ApplicationDbContext context, IMessageQueueService messageQueueService)
+        public MatriculaController(
+            ApplicationDbContext context,
+            IMessageQueueService messageQueueService,
+            IKafkaProducerService kafkaProducerService)
         {
             _context = context;
             _messageQueueService = messageQueueService;
+            _kafkaProducerService = kafkaProducerService;
         }
 
         // POST: api/Matricula/registrar
@@ -53,7 +57,40 @@ namespace EnvioCorreo.Controllers
             _context.Matriculas.Add(nuevaMatricula);
             await _context.SaveChangesAsync();
 
-            // 4. ✅ PUBLICAR EN RABBITMQ INMEDIATAMENTE (sin enviar correo aquí)
+            // 4. ✅ ENVIAR LOG DE MATRÍCULA A KAFKA
+            try
+            {
+                var matriculaLog = new MatriculaLogEvent
+                {
+                    MatriculaId = nuevaMatricula.MatriculaId,
+                    EstudianteId = nuevaMatricula.EstudianteId,
+                    SeccionId = nuevaMatricula.SeccionId,
+                    Costo = nuevaMatricula.Costo,
+                    MetodoPago = nuevaMatricula.MetodoPago,
+                    Estado = nuevaMatricula.Estado,
+                    FechaMatricula = nuevaMatricula.FechaMatricula,
+                    EventType = "MATRICULA_REGISTRADA",
+                    Message = $"Matrícula registrada exitosamente para estudiante {estudiante.Nombre} {estudiante.Apellido}"
+                };
+
+                var kafkaSuccess = await _kafkaProducerService.ProduceMatriculaLogAsync(matriculaLog);
+
+                if (kafkaSuccess)
+                {
+                    Console.WriteLine($"[CONTROLLER] Log de matrícula enviado a Kafka: {nuevaMatricula.MatriculaId}");
+                }
+                else
+                {
+                    Console.WriteLine($"[CONTROLLER WARNING] No se pudo enviar log a Kafka: {nuevaMatricula.MatriculaId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CONTROLLER ERROR] Error al enviar a Kafka: {ex.Message}");
+                // No falla la matrícula si Kafka falla
+            }
+
+            // 5. ✅ PUBLICAR EN RABBITMQ PARA ENVÍO DE CORREO
             try
             {
                 string asunto = $"✅ Confirmación de Pre-Matrícula - Código #{nuevaMatricula.MatriculaId}";
@@ -67,21 +104,31 @@ namespace EnvioCorreo.Controllers
                 {
                     EstudianteId = estudiante.EstudianteId,
                     SeccionId = nuevaMatricula.SeccionId,
-                    MatriculaId = nuevaMatricula.MatriculaId, // ✅ Agregar esto
+                    MatriculaId = nuevaMatricula.MatriculaId,
                     To = estudiante.Email,
                     Subject = asunto,
                     Body = cuerpo,
                     Timestamp = DateTime.UtcNow,
-                    MessageType = "EmailPending" // ✅ Cambiar a "Pending"
+                    MessageType = "EmailPending"
                 };
 
                 _messageQueueService.PublishEmailSentMessage(emailEvent);
-                Console.WriteLine($"[API] Mensaje publicado en RabbitMQ para estudiante {estudiante.EstudianteId}");
+                Console.WriteLine($"[CONTROLLER] Mensaje publicado en RabbitMQ para estudiante {estudiante.EstudianteId}");
+
+                // 6. ✅ OPCIONAL: ENVIAR EVENTO DE EMAIL A KAFKA TAMBIÉN
+                try
+                {
+                    await _kafkaProducerService.ProduceEmailEventAsync(emailEvent);
+                    Console.WriteLine($"[CONTROLLER] Evento de email enviado a Kafka también");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CONTROLLER WARNING] No se pudo enviar evento de email a Kafka: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
-                // Solo log el error de RabbitMQ, pero la matrícula ya está guardada
-                Console.WriteLine($"[API ERROR] Error al publicar en RabbitMQ: {ex.Message}");
+                Console.WriteLine($"[CONTROLLER ERROR] Error al publicar en RabbitMQ: {ex.Message}");
             }
 
             var respuesta = new MatriculaRespuestaDto
@@ -94,7 +141,6 @@ namespace EnvioCorreo.Controllers
                 NombreCompletoEstudiante = $"{estudiante.Nombre} {estudiante.Apellido}"
             };
 
-            // ✅ El cliente recibe respuesta INMEDIATA sin esperar el correo
             return CreatedAtAction(nameof(RegistrarMatricula), new { id = respuesta.MatriculaId }, respuesta);
         }
     }

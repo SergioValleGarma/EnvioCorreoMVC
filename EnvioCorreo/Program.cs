@@ -22,26 +22,32 @@ builder.Configuration.AddJsonFile(
     reloadOnChange: true
 );
 
-// DEBUG: Verificar configuración cargada
+// 3. ? CARGA LA CONFIGURACIÓN DE KAFKA
+builder.Configuration.AddJsonFile(
+    path: Path.Combine(builder.Environment.ContentRootPath, "Config", "kafkasettings.json"),
+    optional: false,
+    reloadOnChange: true
+);
+
+// DEBUG: Verificar configuraciones cargadas
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQSettings");
-Console.WriteLine($"[CONFIG DEBUG] RabbitMQ Host: {rabbitMQConfig["HostName"]}");
-Console.WriteLine($"[CONFIG DEBUG] RabbitMQ Queue: {rabbitMQConfig["QueueName"]}");
+var kafkaConfig = builder.Configuration.GetSection("KafkaSettings");
+Console.WriteLine($"[CONFIG] RabbitMQ Host: {rabbitMQConfig["HostName"]}");
+Console.WriteLine($"[CONFIG] Kafka Servers: {kafkaConfig["BootstrapServers"]}");
 
-// Registra la configuración de MailSettings
-builder.Services.Configure<MailSettings>(
-    builder.Configuration.GetSection("MailSettings"));
+// Registra las configuraciones
+builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("MailSettings"));
+builder.Services.Configure<RabbitMQSettings>(builder.Configuration.GetSection("RabbitMQSettings"));
+builder.Services.Configure<KafkaSettings>(builder.Configuration.GetSection("KafkaSettings")); // ? NUEVO
 
-// REGISTRA LA CONFIGURACIÓN DE RABBITMQ
-builder.Services.Configure<RabbitMQSettings>(
-    builder.Configuration.GetSection("RabbitMQSettings"));
-
-// ? REGISTRA EL SERVICIO DE RABBITMQ (para publicar)
+// ? REGISTRA LOS SERVICIOS DE MENSAJERÍA
 builder.Services.AddSingleton<IMessageQueueService, RabbitMQPublisherService>();
+builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>(); // ? NUEVO
 
-// ? REGISTRA EL CONSUMIDOR COMO HOSTED SERVICE
+// ? REGISTRA EL CONSUMIDOR DE RABBITMQ
 builder.Services.AddHostedService<EmailConsumerService>();
 
-// ? REGISTRA EL SERVICIO DE CORREO (para el consumidor)
+// ? REGISTRA EL SERVICIO DE CORREO
 builder.Services.AddTransient<IEmailService, EmailService>();
 
 // Add services to the container.
@@ -71,6 +77,40 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+// ? ENDPOINTS DE PRUEBA PARA KAFKA
+app.MapGet("/test-kafka", async (IKafkaProducerService kafkaService) =>
+{
+    try
+    {
+        var testLog = new MatriculaLogEvent
+        {
+            MatriculaId = 999,
+            EstudianteId = 1,
+            SeccionId = 1,
+            Costo = 100.50m,
+            MetodoPago = "Test",
+            Estado = "TEST",
+            FechaMatricula = DateTime.Today,
+            EventType = "TEST_EVENT",
+            Message = "Mensaje de prueba para Kafka"
+        };
+
+        var success = await kafkaService.ProduceMatriculaLogAsync(testLog);
+
+        return Results.Ok(new
+        {
+            message = "Test de Kafka ejecutado",
+            kafkaSuccess = success,
+            timestamp = DateTime.UtcNow
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Error testing Kafka: {ex.Message}");
+    }
+});
+
 
 // ? ENDPOINTS DE PRUEBA
 // ? ENDPOINTS DE PRUEBA - ACTUALIZADO para usar las propiedades correctas
