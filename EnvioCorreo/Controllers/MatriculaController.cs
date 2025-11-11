@@ -12,12 +12,14 @@ namespace EnvioCorreo.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IEmailService _emailService;
+        private readonly IMessageQueueService _messageQueueService; // ✅ AGREGAR ESTO
 
-        // Inyección de dependencias para DBContext y EmailService
-        public MatriculaController(ApplicationDbContext context, IEmailService emailService)
+        // Inyección de dependencias para DBContext, EmailService y MessageQueueService
+        public MatriculaController(ApplicationDbContext context, IEmailService emailService, IMessageQueueService messageQueueService)
         {
             _context = context;
             _emailService = emailService;
+            _messageQueueService = messageQueueService; // ✅ AGREGAR ESTO
         }
 
         // POST: api/Matricula/registrar
@@ -64,11 +66,37 @@ namespace EnvioCorreo.Controllers
                                 $"Atentamente,<br>Gestión Académica.";
 
                 await _emailService.SendEmailAsync(estudiante.Email, asunto, cuerpo);
+
+                // ✅ 5. PUBLICAR MENSAJE EN RABBITMQ - DESPUÉS DE ENVIAR CORREO EXITOSAMENTE
+                var emailEvent = new EmailSentEvent
+                {
+                    EstudianteId = estudiante.EstudianteId,
+                    SeccionId = nuevaMatricula.SeccionId,
+                    Timestamp = DateTime.UtcNow,
+                    MessageType = "EmailSent",
+                    // Opcional: agregar información del correo
+                    To = estudiante.Email,
+                    Subject = asunto
+                };
+
+                _messageQueueService.PublishEmailSentMessage(emailEvent);
+                Console.WriteLine($"[RABBITMQ] Mensaje publicado para estudiante {estudiante.EstudianteId}");
             }
             catch (Exception ex)
             {
                 // Opcional: Registrar el error de correo, pero permitir que el registro de matrícula continúe
                 Console.WriteLine($"Error al enviar correo de notificación: {ex.Message}");
+
+                // ❌ Si falla el correo, también publicar un evento de error
+                var errorEvent = new EmailSentEvent
+                {
+                    EstudianteId = estudiante.EstudianteId,
+                    SeccionId = nuevaMatricula.SeccionId,
+                    Timestamp = DateTime.UtcNow,
+                    MessageType = "EmailFailed",
+                    To = estudiante.Email
+                };
+                _messageQueueService.PublishEmailSentMessage(errorEvent);
             }
 
             var respuesta = new MatriculaRespuestaDto

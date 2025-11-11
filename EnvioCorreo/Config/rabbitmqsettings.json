@@ -1,0 +1,9 @@
+{
+  "RabbitMQSettings": {
+    "HostName": "rabbitmq",
+    "UserName": "guest",
+    "Password": "guest",
+    "QueueName": "email_sent_queue",
+    "Port": 5672
+  }
+}

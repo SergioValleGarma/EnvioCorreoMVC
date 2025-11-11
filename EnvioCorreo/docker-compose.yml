@@ -1,4 +1,3 @@
-
 services:
   app:
     image: envio_correo_app:latest
@@ -10,5 +9,33 @@ services:
       - "7069:8080"
     environment:
       - ConnectionStrings__UniversidadConnection=Server=host.docker.internal\SQLNET;Database=GestionMatriculaDB;User Id=sa;Password=uni;TrustServerCertificate=true;MultipleActiveResultSets=True
-    
+      - RabbitMQSettings__HostName=rabbitmq
+      - RabbitMQSettings__UserName=guest
+      - RabbitMQSettings__Password=guest
+      - RabbitMQSettings__QueueName=email_queue
     restart: always
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3-management 
+    container_name: rabbitmq_broker
+    ports:
+      - "5672:5672" 
+      - "15672:15672" 
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq 
+    restart: always
+
+volumes:
+  rabbitmq_data:
