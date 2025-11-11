@@ -11,15 +11,13 @@ namespace EnvioCorreo.Controllers
     public class MatriculaController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IEmailService _emailService;
-        private readonly IMessageQueueService _messageQueueService; // ✅ AGREGAR ESTO
+        private readonly IMessageQueueService _messageQueueService; // ✅ Solo RabbitMQ
 
-        // Inyección de dependencias para DBContext, EmailService y MessageQueueService
-        public MatriculaController(ApplicationDbContext context, IEmailService emailService, IMessageQueueService messageQueueService)
+        // ❌ REMOVEMOS IEmailService del constructor - ahora lo maneja el consumidor
+        public MatriculaController(ApplicationDbContext context, IMessageQueueService messageQueueService)
         {
             _context = context;
-            _emailService = emailService;
-            _messageQueueService = messageQueueService; // ✅ AGREGAR ESTO
+            _messageQueueService = messageQueueService;
         }
 
         // POST: api/Matricula/registrar
@@ -48,14 +46,14 @@ namespace EnvioCorreo.Controllers
                 Costo = dto.Costo,
                 MetodoPago = dto.MetodoPago,
                 FechaMatricula = DateTime.Today,
-                Estado = "PENDIENTE" // Estado inicial
+                Estado = "PENDIENTE"
             };
 
             // 3. Guardar en la Base de Datos
             _context.Matriculas.Add(nuevaMatricula);
-            await _context.SaveChangesAsync(); // Se guarda el registro en la DB
+            await _context.SaveChangesAsync();
 
-            // 4. Enviar Correo de Notificación (Usando Mailtrap)
+            // 4. ✅ PUBLICAR EN RABBITMQ INMEDIATAMENTE (sin enviar correo aquí)
             try
             {
                 string asunto = $"✅ Confirmación de Pre-Matrícula - Código #{nuevaMatricula.MatriculaId}";
@@ -65,38 +63,25 @@ namespace EnvioCorreo.Controllers
                                 $"Revisa tu portal para completar el pago.<br><br>" +
                                 $"Atentamente,<br>Gestión Académica.";
 
-                await _emailService.SendEmailAsync(estudiante.Email, asunto, cuerpo);
-
-                // ✅ 5. PUBLICAR MENSAJE EN RABBITMQ - DESPUÉS DE ENVIAR CORREO EXITOSAMENTE
                 var emailEvent = new EmailSentEvent
                 {
                     EstudianteId = estudiante.EstudianteId,
                     SeccionId = nuevaMatricula.SeccionId,
-                    Timestamp = DateTime.UtcNow,
-                    MessageType = "EmailSent",
-                    // Opcional: agregar información del correo
+                    MatriculaId = nuevaMatricula.MatriculaId, // ✅ Agregar esto
                     To = estudiante.Email,
-                    Subject = asunto
+                    Subject = asunto,
+                    Body = cuerpo,
+                    Timestamp = DateTime.UtcNow,
+                    MessageType = "EmailPending" // ✅ Cambiar a "Pending"
                 };
 
                 _messageQueueService.PublishEmailSentMessage(emailEvent);
-                Console.WriteLine($"[RABBITMQ] Mensaje publicado para estudiante {estudiante.EstudianteId}");
+                Console.WriteLine($"[API] Mensaje publicado en RabbitMQ para estudiante {estudiante.EstudianteId}");
             }
             catch (Exception ex)
             {
-                // Opcional: Registrar el error de correo, pero permitir que el registro de matrícula continúe
-                Console.WriteLine($"Error al enviar correo de notificación: {ex.Message}");
-
-                // ❌ Si falla el correo, también publicar un evento de error
-                var errorEvent = new EmailSentEvent
-                {
-                    EstudianteId = estudiante.EstudianteId,
-                    SeccionId = nuevaMatricula.SeccionId,
-                    Timestamp = DateTime.UtcNow,
-                    MessageType = "EmailFailed",
-                    To = estudiante.Email
-                };
-                _messageQueueService.PublishEmailSentMessage(errorEvent);
+                // Solo log el error de RabbitMQ, pero la matrícula ya está guardada
+                Console.WriteLine($"[API ERROR] Error al publicar en RabbitMQ: {ex.Message}");
             }
 
             var respuesta = new MatriculaRespuestaDto
@@ -106,11 +91,10 @@ namespace EnvioCorreo.Controllers
                 SeccionId = nuevaMatricula.SeccionId,
                 Costo = nuevaMatricula.Costo,
                 Estado = nuevaMatricula.Estado,
-                // Usamos la entidad 'estudiante' que ya cargamos al inicio
                 NombreCompletoEstudiante = $"{estudiante.Nombre} {estudiante.Apellido}"
             };
 
-            // Devolvemos el DTO, que no tiene referencias circulares.
+            // ✅ El cliente recibe respuesta INMEDIATA sin esperar el correo
             return CreatedAtAction(nameof(RegistrarMatricula), new { id = respuesta.MatriculaId }, respuesta);
         }
     }

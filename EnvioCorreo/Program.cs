@@ -15,7 +15,7 @@ builder.Configuration.AddJsonFile(
     reloadOnChange: true
 );
 
-// 2. CARGA LA CONFIGURACIÓN DE RABBITMQ - ¡ESTO ES CRÍTICO!
+// 2. CARGA LA CONFIGURACIÓN DE RABBITMQ
 builder.Configuration.AddJsonFile(
     path: Path.Combine(builder.Environment.ContentRootPath, "Config", "rabbitmqsettings.json"),
     optional: false,
@@ -35,10 +35,13 @@ builder.Services.Configure<MailSettings>(
 builder.Services.Configure<RabbitMQSettings>(
     builder.Configuration.GetSection("RabbitMQSettings"));
 
-// REGISTRA EL SERVICIO DE RABBITMQ COMO SINGLETON
+// ? REGISTRA EL SERVICIO DE RABBITMQ (para publicar)
 builder.Services.AddSingleton<IMessageQueueService, RabbitMQPublisherService>();
 
-// Registra el servicio de correo
+// ? REGISTRA EL CONSUMIDOR COMO HOSTED SERVICE
+builder.Services.AddHostedService<EmailConsumerService>();
+
+// ? REGISTRA EL SERVICIO DE CORREO (para el consumidor)
 builder.Services.AddTransient<IEmailService, EmailService>();
 
 // Add services to the container.
