@@ -22,32 +22,37 @@ builder.Configuration.AddJsonFile(
     reloadOnChange: true
 );
 
-// 3. ? CARGA LA CONFIGURACIÓN DE KAFKA
-builder.Configuration.AddJsonFile(
-    path: Path.Combine(builder.Environment.ContentRootPath, "Config", "kafkasettings.json"),
-    optional: false,
-    reloadOnChange: true
-);
+// 3. REMOVER LA CONFIGURACIÓN DE KAFKA - Ya no la necesitamos
+// builder.Configuration.AddJsonFile(
+//     path: Path.Combine(builder.Environment.ContentRootPath, "Config", "kafkasettings.json"),
+//     optional: false,
+//     reloadOnChange: true
+// );
 
 // DEBUG: Verificar configuraciones cargadas
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQSettings");
-var kafkaConfig = builder.Configuration.GetSection("KafkaSettings");
 Console.WriteLine($"[CONFIG] RabbitMQ Host: {rabbitMQConfig["HostName"]}");
-Console.WriteLine($"[CONFIG] Kafka Servers: {kafkaConfig["BootstrapServers"]}");
 
 // Registra las configuraciones
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("MailSettings"));
 builder.Services.Configure<RabbitMQSettings>(builder.Configuration.GetSection("RabbitMQSettings"));
-builder.Services.Configure<KafkaSettings>(builder.Configuration.GetSection("KafkaSettings")); // ? NUEVO
 
-// ? REGISTRA LOS SERVICIOS DE MENSAJERÍA
+// REGISTRA HTTP CLIENT PARA KAFKA API
+builder.Services.AddHttpClient<IKafkaApiClient, KafkaApiClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// REGISTRA LOS SERVICIOS DE MENSAJERÍA
 builder.Services.AddSingleton<IMessageQueueService, RabbitMQPublisherService>();
-builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>(); // ? NUEVO
 
-// ? REGISTRA EL CONSUMIDOR DE RABBITMQ
+// REMOVER EL SERVICIO DIRECTO DE KAFKA - ahora solo usamos el API
+// builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
+
+// REGISTRA EL CONSUMIDOR DE RABBITMQ
 builder.Services.AddHostedService<EmailConsumerService>();
 
-// ? REGISTRA EL SERVICIO DE CORREO
+// REGISTRA EL SERVICIO DE CORREO
 builder.Services.AddTransient<IEmailService, EmailService>();
 
 // Add services to the container.
@@ -78,8 +83,8 @@ app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
-// ? ENDPOINTS DE PRUEBA PARA KAFKA
-app.MapGet("/test-kafka", async (IKafkaProducerService kafkaService) =>
+// ENDPOINTS DE PRUEBA ACTUALIZADOS PARA USAR KAFKA API
+app.MapGet("/test-kafka-api", async (IKafkaApiClient kafkaClient) =>
 {
     try
     {
@@ -93,27 +98,25 @@ app.MapGet("/test-kafka", async (IKafkaProducerService kafkaService) =>
             Estado = "TEST",
             FechaMatricula = DateTime.Today,
             EventType = "TEST_EVENT",
-            Message = "Mensaje de prueba para Kafka"
+            Message = "Mensaje de prueba para Kafka API"
         };
 
-        var success = await kafkaService.ProduceMatriculaLogAsync(testLog);
+        var success = await kafkaClient.SendMatriculaLogAsync(testLog);
 
         return Results.Ok(new
         {
-            message = "Test de Kafka ejecutado",
-            kafkaSuccess = success,
+            message = "Test de Kafka API ejecutado",
+            kafkaApiSuccess = success,
             timestamp = DateTime.UtcNow
         });
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Error testing Kafka: {ex.Message}");
+        return Results.Problem($"Error testing Kafka API: {ex.Message}");
     }
 });
 
-
-// ? ENDPOINTS DE PRUEBA
-// ? ENDPOINTS DE PRUEBA - ACTUALIZADO para usar las propiedades correctas
+// ENDPOINTS DE PRUEBA PARA RABBITMQ
 app.MapGet("/test-rabbitmq", (IMessageQueueService rabbitService) =>
 {
     try
@@ -146,7 +149,7 @@ app.MapGet("/test-rabbitmq", (IMessageQueueService rabbitService) =>
     }
 });
 
-// ? Endpoint para verificar configuración
+// Endpoint para verificar configuración
 app.MapGet("/debug-config", (IOptions<RabbitMQSettings> rabbitSettings) =>
 {
     var config = rabbitSettings.Value;
@@ -161,25 +164,30 @@ app.MapGet("/debug-config", (IOptions<RabbitMQSettings> rabbitSettings) =>
     });
 });
 
-// ? Endpoint para verificar si el servicio está registrado
-app.MapGet("/debug-service", (IServiceProvider serviceProvider) =>
+// Nuevo endpoint para probar Kafka API Client
+app.MapGet("/debug-kafka-api", async (IKafkaApiClient kafkaClient, IServiceProvider serviceProvider) =>
 {
     try
     {
-        var service = serviceProvider.GetService<IMessageQueueService>();
-        if (service == null)
+        var kafkaApiClient = serviceProvider.GetService<IKafkaApiClient>();
+        if (kafkaApiClient == null)
         {
-            Console.WriteLine($"[DEBUG SERVICE] IMessageQueueService is NULL - NOT REGISTERED");
-            return Results.Problem("IMessageQueueService is not registered in DI container");
+            return Results.Problem("IKafkaApiClient is not registered in DI container");
         }
 
-        Console.WriteLine($"[DEBUG SERVICE] IMessageQueueService is properly registered");
-        return Results.Ok(new { serviceRegistered = true, serviceType = service.GetType().Name });
+        // Test simple
+        var testResult = await kafkaClient.SendGenericMessageAsync("test-topic", "Test message from API Client");
+
+        return Results.Ok(new
+        {
+            kafkaApiClientRegistered = true,
+            testMessageSent = testResult,
+            timestamp = DateTime.UtcNow
+        });
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[DEBUG SERVICE ERROR] {ex.Message}");
-        return Results.Problem($"Error checking service: {ex.Message}");
+        return Results.Problem($"Error checking Kafka API Client: {ex.Message}");
     }
 });
 

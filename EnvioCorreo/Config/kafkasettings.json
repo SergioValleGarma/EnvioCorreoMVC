@@ -1,8 +1,0 @@
-{
-  "KafkaSettings": {
-    "BootstrapServers": "kafka:9092",
-    "TopicMatriculaLogs": "matricula-logs",
-    "TopicEmailEvents": "email-events",
-    "GroupId": "envio-correo-group"
-  }
-}

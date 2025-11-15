@@ -1,0 +1,43 @@
+@KafkaApiService_HostAddress = http://localhost:7070
+
+### Health Check
+GET {{KafkaApiService_HostAddress}}/api/kafka/health
+
+### Send generic message
+POST {{KafkaApiService_HostAddress}}/api/kafka/message
+Content-Type: application/json
+
+{
+  "topic": "test-topic",
+  "data": "Hello Kafka from API!",
+  "key": "test-key-123"
+}
+
+### Send matricula log
+POST {{KafkaApiService_HostAddress}}/api/kafka/matricula-log
+Content-Type: application/json
+
+{
+  "matriculaId": 1001,
+  "estudianteId": 5001,
+  "seccionId": 2001,
+  "costo": 250.75,
+  "metodoPago": "Tarjeta de Crédito",
+  "estado": "COMPLETADA",
+  "fechaMatricula": "2024-11-14T10:30:00Z",
+  "eventType": "MATRICULA_CREADA",
+  "message": "Matrícula procesada exitosamente"
+}
+
+### Send email event
+POST {{KafkaApiService_HostAddress}}/api/kafka/email-event
+Content-Type: application/json
+
+{
+  "matriculaId": 1001,
+  "to": "estudiante@example.com",
+  "subject": "Confirmación de Matrícula",
+  "body": "Su matrícula ha sido procesada exitosamente",
+  "sentDate": "2024-11-14T10:31:00Z",
+  "eventType": "EMAIL_SENT"
+}

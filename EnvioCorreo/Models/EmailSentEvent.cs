@@ -13,5 +13,6 @@
         public string Subject { get; set; }
         public string Body { get; set; }
         public DateTime SentDate { get; set; }
+        public object EventType { get; internal set; }
     }
 }

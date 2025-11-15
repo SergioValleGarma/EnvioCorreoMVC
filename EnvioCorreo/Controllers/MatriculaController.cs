@@ -12,16 +12,16 @@ namespace EnvioCorreo.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IMessageQueueService _messageQueueService;
-        private readonly IKafkaProducerService _kafkaProducerService;
+        private readonly IKafkaApiClient _kafkaApiClient; // Cambiado de IKafkaProducerService
 
         public MatriculaController(
             ApplicationDbContext context,
             IMessageQueueService messageQueueService,
-            IKafkaProducerService kafkaProducerService)
+            IKafkaApiClient kafkaApiClient) // Cambiado el parámetro
         {
             _context = context;
             _messageQueueService = messageQueueService;
-            _kafkaProducerService = kafkaProducerService;
+            _kafkaApiClient = kafkaApiClient;
         }
 
         // POST: api/Matricula/registrar
@@ -57,7 +57,7 @@ namespace EnvioCorreo.Controllers
             _context.Matriculas.Add(nuevaMatricula);
             await _context.SaveChangesAsync();
 
-            // 4. ✅ ENVIAR LOG DE MATRÍCULA A KAFKA
+            // 4. ✅ ENVIAR LOG DE MATRÍCULA A KAFKA VÍA API
             try
             {
                 var matriculaLog = new MatriculaLogEvent
@@ -73,21 +73,21 @@ namespace EnvioCorreo.Controllers
                     Message = $"Matrícula registrada exitosamente para estudiante {estudiante.Nombre} {estudiante.Apellido}"
                 };
 
-                var kafkaSuccess = await _kafkaProducerService.ProduceMatriculaLogAsync(matriculaLog);
+                var kafkaSuccess = await _kafkaApiClient.SendMatriculaLogAsync(matriculaLog); // Método cambiado
 
                 if (kafkaSuccess)
                 {
-                    Console.WriteLine($"[CONTROLLER] Log de matrícula enviado a Kafka: {nuevaMatricula.MatriculaId}");
+                    Console.WriteLine($"[CONTROLLER] Log de matrícula enviado a Kafka API: {nuevaMatricula.MatriculaId}");
                 }
                 else
                 {
-                    Console.WriteLine($"[CONTROLLER WARNING] No se pudo enviar log a Kafka: {nuevaMatricula.MatriculaId}");
+                    Console.WriteLine($"[CONTROLLER WARNING] No se pudo enviar log a Kafka API: {nuevaMatricula.MatriculaId}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CONTROLLER ERROR] Error al enviar a Kafka: {ex.Message}");
-                // No falla la matrícula si Kafka falla
+                Console.WriteLine($"[CONTROLLER ERROR] Error al enviar a Kafka API: {ex.Message}");
+                // No falla la matrícula si Kafka API falla
             }
 
             // 5. ✅ PUBLICAR EN RABBITMQ PARA ENVÍO DE CORREO
@@ -108,22 +108,22 @@ namespace EnvioCorreo.Controllers
                     To = estudiante.Email,
                     Subject = asunto,
                     Body = cuerpo,
-                    Timestamp = DateTime.UtcNow,
+                    SentDate = DateTime.UtcNow,
                     MessageType = "EmailPending"
                 };
 
                 _messageQueueService.PublishEmailSentMessage(emailEvent);
                 Console.WriteLine($"[CONTROLLER] Mensaje publicado en RabbitMQ para estudiante {estudiante.EstudianteId}");
 
-                // 6. ✅ OPCIONAL: ENVIAR EVENTO DE EMAIL A KAFKA TAMBIÉN
+                // 6. ✅ OPCIONAL: ENVIAR EVENTO DE EMAIL A KAFKA TAMBIÉN VÍA API
                 try
                 {
-                    await _kafkaProducerService.ProduceEmailEventAsync(emailEvent);
-                    Console.WriteLine($"[CONTROLLER] Evento de email enviado a Kafka también");
+                    await _kafkaApiClient.SendEmailEventAsync(emailEvent); // Método cambiado
+                    Console.WriteLine($"[CONTROLLER] Evento de email enviado a Kafka API también");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[CONTROLLER WARNING] No se pudo enviar evento de email a Kafka: {ex.Message}");
+                    Console.WriteLine($"[CONTROLLER WARNING] No se pudo enviar evento de email a Kafka API: {ex.Message}");
                 }
             }
             catch (Exception ex)
