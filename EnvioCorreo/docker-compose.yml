@@ -9,37 +9,11 @@
       - "7069:8080"
     environment:
       - ConnectionStrings__UniversidadConnection=Server=host.docker.internal\SQLNET;Database=GestionMatriculaDB;User Id=sa;Password=uni;TrustServerCertificate=true;MultipleActiveResultSets=True
-      - RabbitMQSettings__HostName=rabbitmq
-      - RabbitMQSettings__UserName=guest
-      - RabbitMQSettings__Password=guest
-      - RabbitMQSettings__QueueName=email_sent_queue
-      - RabbitMQSettings__Port=5672
       - DOTNET_RUNNING_IN_CONTAINER=true
-      - KafkaApiBaseUrl=http://host.docker.internal:7070  # Cambiar aquí
+      - KafkaApiBaseUrl=http://host.docker.internal:7070
+      - RabbitMQApiBaseUrl=http://host.docker.internal:7080  # Nueva variable
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # Agregar esto
-    restart: always
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-
-  rabbitmq:
-    image: rabbitmq:3-management 
-    container_name: rabbitmq_broker
-    ports:
-      - "5672:5672" 
-      - "15672:15672" 
-    environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
-      interval: 30s
-      timeout: 30s
-      retries: 5
-      start_period: 30s
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq 
+      - "host.docker.internal:host-gateway"
     restart: always
 
 volumes:

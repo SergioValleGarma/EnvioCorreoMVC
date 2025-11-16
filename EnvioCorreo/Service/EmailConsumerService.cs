@@ -1,26 +1,23 @@
-﻿using EnvioCorreo.Models;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+﻿using System.Text;
+using System.Text.Json;
+using EnvioCorreo.Models;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System.Text;
-using System.Text.Json;
 
 namespace EnvioCorreo.Service
 {
     public class EmailConsumerService : BackgroundService
     {
-        private readonly IServiceProvider _serviceProvider;
         private readonly RabbitMQSettings _settings;
+        private readonly IEmailService _emailService;
         private IConnection _connection;
         private IModel _channel;
-        private const string QueueName = "email_sent_queue";
 
-        public EmailConsumerService(IServiceProvider serviceProvider, IOptions<RabbitMQSettings> settings)
+        public EmailConsumerService(IOptions<RabbitMQSettings> settings, IEmailService emailService)
         {
-            _serviceProvider = serviceProvider;
             _settings = settings.Value;
+            _emailService = emailService;
             InitializeRabbitMQ();
         }
 
@@ -28,8 +25,6 @@ namespace EnvioCorreo.Service
         {
             try
             {
-                Console.WriteLine($"[CONSUMER] Inicializando conexión RabbitMQ...");
-
                 var factory = new ConnectionFactory()
                 {
                     HostName = _settings.HostName,
@@ -41,15 +36,15 @@ namespace EnvioCorreo.Service
                 _connection = factory.CreateConnection();
                 _channel = _connection.CreateModel();
 
-                // Asegurar que la cola existe
                 _channel.QueueDeclare(
-                    queue: QueueName,
+                    queue: _settings.QueueName,
                     durable: true,
                     exclusive: false,
                     autoDelete: false,
                     arguments: null
                 );
 
+                Console.WriteLine($"[CONSUMER] Inicializando conexión RabbitMQ...");
                 Console.WriteLine($"[CONSUMER] Conectado a RabbitMQ y listo para consumir mensajes");
             }
             catch (Exception ex)
@@ -59,94 +54,64 @@ namespace EnvioCorreo.Service
             }
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            Console.WriteLine($"[CONSUMER] Iniciando consumo de mensajes...");
+            stoppingToken.ThrowIfCancellationRequested();
 
             var consumer = new EventingBasicConsumer(_channel);
-
             consumer.Received += async (model, ea) =>
             {
-                var body = ea.Body.ToArray();
-                var message = Encoding.UTF8.GetString(body);
-
                 try
                 {
+                    var body = ea.Body.ToArray();
+                    var message = Encoding.UTF8.GetString(body);
                     Console.WriteLine($"[CONSUMER] Mensaje recibido: {message}");
 
-                    // Procesar el mensaje
-                    await ProcessMessageAsync(message);
+                    // Deserializar el mensaje
+                    var emailEvent = JsonSerializer.Deserialize<EmailSentEvent>(message);
+                    if (emailEvent != null)
+                    {
+                        Console.WriteLine($"[CONSUMER] Procesando correo para: {emailEvent.To}");
 
-                    // Confirmar que el mensaje fue procesado exitosamente
-                    _channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false);
+                        // Enviar el correo
+                        await _emailService.SendEmailAsync(
+                            emailEvent.To,
+                            emailEvent.Subject,
+                            emailEvent.Body
+                        );
 
-                    Console.WriteLine($"[CONSUMER] Mensaje procesado y confirmado");
+                        Console.WriteLine($"[CONSUMER] Correo enviado exitosamente a: {emailEvent.To}");
+                    }
+
+                    // Confirmar que el mensaje fue procesado
+                    _channel.BasicAck(ea.DeliveryTag, false);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[CONSUMER ERROR] Error procesando mensaje: {ex.Message}");
-
-                    // Rechazar el mensaje y requeue (reintentar)
-                    _channel.BasicNack(deliveryTag: ea.DeliveryTag, multiple: false, requeue: true);
+                    // Rechazar el mensaje para que se reintente
+                    _channel.BasicNack(ea.DeliveryTag, false, true);
                 }
             };
 
-            // Comenzar a consumir mensajes
             _channel.BasicConsume(
-                queue: QueueName,
+                queue: _settings.QueueName,
                 autoAck: false, // IMPORTANTE: false para confirmar manualmente
                 consumer: consumer
             );
 
+            Console.WriteLine($"[CONSUMER] Iniciando consumo de mensajes...");
             Console.WriteLine($"[CONSUMER] Esperando mensajes...");
 
-            // Mantener el servicio corriendo
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                await Task.Delay(1000, stoppingToken);
-            }
-        }
-
-        private async Task ProcessMessageAsync(string messageJson)
-        {
-            try
-            {
-                var emailEvent = JsonSerializer.Deserialize<EmailSentEvent>(messageJson);
-
-                if (emailEvent == null)
-                {
-                    Console.WriteLine($"[CONSUMER ERROR] No se pudo deserializar el mensaje");
-                    return;
-                }
-
-                Console.WriteLine($"[CONSUMER] Procesando correo para: {emailEvent.To}");
-
-                // Usar scope para obtener IEmailService
-                using (var scope = _serviceProvider.CreateScope())
-                {
-                    var emailService = scope.ServiceProvider.GetRequiredService<IEmailService>();
-
-                    // Enviar el correo
-                    await emailService.SendEmailAsync(emailEvent.To, emailEvent.Subject, emailEvent.Body);
-
-                    Console.WriteLine($"[CONSUMER] Correo enviado exitosamente a: {emailEvent.To}");
-
-                    // Actualizar el evento como enviado
-                    emailEvent.MessageType = "EmailSent";
-                    emailEvent.Timestamp = DateTime.UtcNow;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CONSUMER ERROR] Error en ProcessMessageAsync: {ex.Message}");
-                throw;
-            }
+            return Task.CompletedTask;
         }
 
         public override void Dispose()
         {
             _channel?.Close();
+            _channel?.Dispose();
             _connection?.Close();
+            _connection?.Dispose();
             base.Dispose();
         }
     }

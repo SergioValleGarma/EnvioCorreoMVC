@@ -1,56 +1,41 @@
-using EnvioCorreo.Data;
+ï»¿using EnvioCorreo.Data;
 using EnvioCorreo.Models;
 using EnvioCorreo.Service;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Carga la configuración de mailsettings.json
+// 1. Carga SOLO la configuraciÃ³n de mailsettings.json
 builder.Configuration.AddJsonFile(
     path: Path.Combine(builder.Environment.ContentRootPath, "Config", "mailsettings.json"),
     optional: false,
     reloadOnChange: true
 );
 
-// 2. CARGA LA CONFIGURACIÓN DE RABBITMQ
-builder.Configuration.AddJsonFile(
-    path: Path.Combine(builder.Environment.ContentRootPath, "Config", "rabbitmqsettings.json"),
-    optional: false,
-    reloadOnChange: true
-);
-
-// 3. REMOVER LA CONFIGURACIÓN DE KAFKA - Ya no la necesitamos
-// builder.Configuration.AddJsonFile(
-//     path: Path.Combine(builder.Environment.ContentRootPath, "Config", "kafkasettings.json"),
-//     optional: false,
-//     reloadOnChange: true
-// );
-
 // DEBUG: Verificar configuraciones cargadas
-var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQSettings");
-Console.WriteLine($"[CONFIG] RabbitMQ Host: {rabbitMQConfig["HostName"]}");
+Console.WriteLine($"[CONFIG] Kafka API URL: {builder.Configuration["KafkaApiBaseUrl"]}");
+Console.WriteLine($"[CONFIG] RabbitMQ API URL: {builder.Configuration["RabbitMQApiBaseUrl"]}");
 
-// Registra las configuraciones
+// Registra SOLO la configuraciÃ³n necesaria
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("MailSettings"));
-builder.Services.Configure<RabbitMQSettings>(builder.Configuration.GetSection("RabbitMQSettings"));
 
-// REGISTRA HTTP CLIENT PARA KAFKA API
+// REGISTRA HTTP CLIENTS PARA APIs EXTERNAS
 builder.Services.AddHttpClient<IKafkaApiClient, KafkaApiClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-// REGISTRA LOS SERVICIOS DE MENSAJERÍA
-builder.Services.AddSingleton<IMessageQueueService, RabbitMQPublisherService>();
+builder.Services.AddHttpClient<IRabbitMQApiClient, RabbitMQApiClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
-// REMOVER EL SERVICIO DIRECTO DE KAFKA - ahora solo usamos el API
-// builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
+// REGISTRA EL NUEVO SERVICIO QUE USA LA API
+builder.Services.AddSingleton<IMessageQueueService, RabbitMQApiClientService>();
 
-// REGISTRA EL CONSUMIDOR DE RABBITMQ
-builder.Services.AddHostedService<EmailConsumerService>();
+// âœ… IMPORTANTE: REACTIVAR EL CONSUMIDOR DE EMAILS
+//builder.Services.AddHostedService<EmailConsumerService>();
 
 // REGISTRA EL SERVICIO DE CORREO
 builder.Services.AddTransient<IEmailService, EmailService>();
@@ -58,14 +43,13 @@ builder.Services.AddTransient<IEmailService, EmailService>();
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
-// Obtenemos la cadena de la configuración
+// Obtenemos la cadena de la configuraciÃ³n
 var connectionString = builder.Configuration.GetConnectionString("UniversidadConnection");
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString));
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
@@ -116,78 +100,94 @@ app.MapGet("/test-kafka-api", async (IKafkaApiClient kafkaClient) =>
     }
 });
 
-// ENDPOINTS DE PRUEBA PARA RABBITMQ
-app.MapGet("/test-rabbitmq", (IMessageQueueService rabbitService) =>
+// ENDPOINTS DE PRUEBA PARA RABBITMQ API
+app.MapGet("/test-rabbitmq-api", async (IRabbitMQApiClient rabbitClient) =>
 {
     try
     {
-        Console.WriteLine($"[TEST] Starting RabbitMQ test...");
+        Console.WriteLine($"[TEST] Starting RabbitMQ API test...");
 
         var testEvent = new EmailSentEvent
         {
             To = "test@example.com",
-            Subject = "Test RabbitMQ Connection",
-            Body = "This is a test message from RabbitMQ",
+            Subject = "Test RabbitMQ API Connection",
+            Body = "This is a test message from RabbitMQ API",
             SentDate = DateTime.UtcNow
         };
 
-        Console.WriteLine($"[TEST] Publishing test message to RabbitMQ...");
-        rabbitService.PublishEmailSentMessage(testEvent);
-        Console.WriteLine($"[TEST] Message published successfully");
+        Console.WriteLine($"[TEST] Sending test message to RabbitMQ API...");
+        var success = await rabbitClient.PublishEmailMessageAsync(testEvent);
+        Console.WriteLine($"[TEST] Message sent to API: {success}");
 
         return Results.Ok(new
         {
-            message = "RabbitMQ test message published successfully",
+            message = "RabbitMQ API test message sent successfully",
+            apiSuccess = success,
             timestamp = DateTime.UtcNow
         });
     }
     catch (Exception ex)
     {
         Console.WriteLine($"[TEST ERROR] {ex.Message}");
-        Console.WriteLine($"[TEST ERROR STACK] {ex.StackTrace}");
-        return Results.Problem($"Error testing RabbitMQ: {ex.Message}");
+        return Results.Problem($"Error testing RabbitMQ API: {ex.Message}");
     }
 });
 
-// Endpoint para verificar configuración
-app.MapGet("/debug-config", (IOptions<RabbitMQSettings> rabbitSettings) =>
-{
-    var config = rabbitSettings.Value;
-    Console.WriteLine($"[DEBUG CONFIG] Host: {config.HostName}, Queue: {config.QueueName}");
-    return Results.Ok(new
-    {
-        hostName = config.HostName,
-        userName = config.UserName,
-        queueName = config.QueueName,
-        port = config.Port,
-        configLoaded = config != null
-    });
-});
-
-// Nuevo endpoint para probar Kafka API Client
-app.MapGet("/debug-kafka-api", async (IKafkaApiClient kafkaClient, IServiceProvider serviceProvider) =>
+// Endpoint para verificar servicios externos
+app.MapGet("/debug-services", async (IKafkaApiClient kafkaClient, IRabbitMQApiClient rabbitClient) =>
 {
     try
     {
-        var kafkaApiClient = serviceProvider.GetService<IKafkaApiClient>();
-        if (kafkaApiClient == null)
-        {
-            return Results.Problem("IKafkaApiClient is not registered in DI container");
-        }
+        // Probar Kafka API
+        var kafkaHealth = await kafkaClient.SendGenericMessageAsync("health-check", "Health test");
 
-        // Test simple
-        var testResult = await kafkaClient.SendGenericMessageAsync("test-topic", "Test message from API Client");
+        // Probar RabbitMQ API
+        var testEmail = new EmailSentEvent
+        {
+            To = "health@test.com",
+            Subject = "Health Check",
+            Body = "Health test message",
+            SentDate = DateTime.UtcNow
+        };
+        var rabbitHealth = await rabbitClient.PublishEmailMessageAsync(testEmail);
 
         return Results.Ok(new
         {
-            kafkaApiClientRegistered = true,
-            testMessageSent = testResult,
+            kafkaApiHealth = kafkaHealth,
+            rabbitMQApiHealth = rabbitHealth,
             timestamp = DateTime.UtcNow
         });
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Error checking Kafka API Client: {ex.Message}");
+        return Results.Problem($"Error checking external services: {ex.Message}");
+    }
+});
+
+// Endpoint para probar el envÃ­o de email directamente
+app.MapGet("/test-email-direct", async (IEmailService emailService) =>
+{
+    try
+    {
+        Console.WriteLine($"[TEST EMAIL] Probando envÃ­o directo de email...");
+
+        await emailService.SendEmailAsync(
+            "test@example.com",
+            "Test Directo - Mailtrap",
+            "Este es un test directo del servicio de email"
+        );
+
+        return Results.Ok(new
+        {
+            message = "Email de prueba enviado directamente",
+            timestamp = DateTime.UtcNow
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[TEST EMAIL ERROR] {ex.Message}");
+        Console.WriteLine($"[TEST EMAIL ERROR STACK] {ex.StackTrace}");
+        return Results.Problem($"Error enviando email directo: {ex.Message}");
     }
 });
 

@@ -23,13 +23,19 @@ POST   http://localhost:7069/api/Matricula/registrar
     "MetodoPago": "PAYPAL"
 }
 
+# Primero crear red docker
+docker network create app-network
+
 # RabbitMQ
 http://localhost:15672/#/
+usuario: guest
+contraseña: guest
 
 # Kafka
 http://localhost:9000/
 
-# limpiar docker
+## limpiar docker
+
 # Para todos los contenedores
 docker-compose down
 

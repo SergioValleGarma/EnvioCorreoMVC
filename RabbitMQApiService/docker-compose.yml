@@ -1,0 +1,40 @@
+﻿services:
+  rabbitmq-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rabbitmq_api_service
+    ports:
+      - "7080:8080"
+    environment:
+      - RabbitMQ__HostName=rabbitmq
+      - RabbitMQ__UserName=guest
+      - RabbitMQ__Password=guest
+      - RabbitMQ__QueueName=email_sent_queue
+      - RabbitMQ__Port=5672
+      - DOTNET_RUNNING_IN_CONTAINER=true
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management 
+    container_name: rabbitmq_broker
+    ports:
+      - "5672:5672" 
+      - "15672:15672" 
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq 
+    restart: always
+
+volumes:
+  rabbitmq_data:
