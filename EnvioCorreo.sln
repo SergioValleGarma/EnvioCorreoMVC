@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KafkaApiService", "KafkaApi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RabbitMQApiService", "RabbitMQApiService\RabbitMQApiService.csproj", "{3EF40277-2F9E-4690-A956-E5F4DE0CFF3E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SSOService", "SSOService\SSOService.csproj", "{EE30275D-12CC-41F5-A5B6-240C9B68818F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,10 @@ Global
 		{3EF40277-2F9E-4690-A956-E5F4DE0CFF3E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3EF40277-2F9E-4690-A956-E5F4DE0CFF3E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3EF40277-2F9E-4690-A956-E5F4DE0CFF3E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EE30275D-12CC-41F5-A5B6-240C9B68818F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EE30275D-12CC-41F5-A5B6-240C9B68818F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EE30275D-12CC-41F5-A5B6-240C9B68818F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EE30275D-12CC-41F5-A5B6-240C9B68818F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -6,6 +6,18 @@ using Microsoft.Extensions.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 🔥 AGREGAR CORS PARA PERMITIR EL FRONTEND REACT
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000") // URL de tu frontend React
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
+
 // 1. Carga SOLO la configuración de mailsettings.json
 builder.Configuration.AddJsonFile(
     path: Path.Combine(builder.Environment.ContentRootPath, "Config", "mailsettings.json"),
@@ -49,6 +61,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString));
 
 var app = builder.Build();
+
+// 🔥 USAR CORS - ESTA LÍNEA ES CRÍTICA
+app.UseCors("AllowReactApp");
 
 if (!app.Environment.IsDevelopment())
 {
@@ -189,6 +204,138 @@ app.MapGet("/test-email-direct", async (IEmailService emailService) =>
         Console.WriteLine($"[TEST EMAIL ERROR STACK] {ex.StackTrace}");
         return Results.Problem($"Error enviando email directo: {ex.Message}");
     }
+});
+
+// 🔥 ENDPOINT DE HEALTH CHECK PARA EL FRONTEND
+app.MapGet("/health", () =>
+{
+    return Results.Ok(new
+    {
+        status = "Backend funcionando correctamente",
+        timestamp = DateTime.UtcNow,
+        version = "1.0.0"
+    });
+});
+
+// 🔥 ENDPOINT RAIZ TAMBIÉN PARA HEALTH CHECK
+app.MapGet("/", () =>
+{
+    return Results.Ok(new
+    {
+        message = "Backend de Gestión de Matrículas",
+        status = "Operacional",
+        timestamp = DateTime.UtcNow
+    });
+});
+
+// 🔥 ENDPOINT PARA LISTAR MATRÍCULAS
+app.MapGet("/api/matricula", async (ApplicationDbContext context) =>
+{
+    try
+    {
+        var matriculas = await context.Matriculas
+            .Include(m => m.Estudiante)
+            .OrderByDescending(m => m.MatriculaId)
+            .Select(m => new
+            {
+                MatriculaId = m.MatriculaId,
+                EstudianteId = m.EstudianteId,
+                SeccionId = m.SeccionId,
+                Costo = m.Costo,
+                MetodoPago = m.MetodoPago,
+                Estado = m.Estado,
+                FechaMatricula = m.FechaMatricula,
+                NombreCompletoEstudiante = m.Estudiante.Nombre + " " + m.Estudiante.Apellido
+            })
+            .ToListAsync();
+
+        return Results.Ok(matriculas);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[ERROR] Error al obtener matrículas: {ex.Message}");
+        return Results.Problem($"Error al obtener matrículas: {ex.Message}");
+    }
+});
+
+// 🔥 ENDPOINT PARA OBTENER UNA MATRÍCULA POR ID
+app.MapGet("/api/matricula/{id}", async (ApplicationDbContext context, int id) =>
+{
+    try
+    {
+        var matricula = await context.Matriculas
+            .Include(m => m.Estudiante)
+            .Where(m => m.MatriculaId == id)
+            .Select(m => new
+            {
+                MatriculaId = m.MatriculaId,
+                EstudianteId = m.EstudianteId,
+                SeccionId = m.SeccionId,
+                Costo = m.Costo,
+                MetodoPago = m.MetodoPago,
+                Estado = m.Estado,
+                FechaMatricula = m.FechaMatricula,
+                NombreCompletoEstudiante = m.Estudiante.Nombre + " " + m.Estudiante.Apellido
+            })
+            .FirstOrDefaultAsync();
+
+        if (matricula == null)
+        {
+            return Results.NotFound($"Matrícula con ID {id} no encontrada");
+        }
+
+        return Results.Ok(matricula);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[ERROR] Error al obtener matrícula {id}: {ex.Message}");
+        return Results.Problem($"Error al obtener matrícula: {ex.Message}");
+    }
+});
+
+// 🔥 ENDPOINT PARA LISTAR ESTUDIANTES
+app.MapGet("/api/estudiante", async (ApplicationDbContext context) =>
+{
+    try
+    {
+        var estudiantes = await context.Estudiantes
+            .OrderBy(e => e.EstudianteId)
+            .Select(e => new
+            {
+                EstudianteId = e.EstudianteId,
+                Nombre = e.Nombre,
+                Apellido = e.Apellido,
+                Email = e.Email,
+                Telefono = e.Telefono,
+                Direccion = e.Direccion
+            })
+            .ToListAsync();
+
+        return Results.Ok(estudiantes);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[ERROR] Error al obtener estudiantes: {ex.Message}");
+        return Results.Problem($"Error al obtener estudiantes: {ex.Message}");
+    }
+});
+
+// 🔥 ENDPOINT RAIZ PARA HEALTH CHECK DEL FRONTEND
+app.MapGet("/api", () =>
+{
+    return Results.Ok(new
+    {
+        message = "API de Gestión de Matrículas - Backend funcionando",
+        status = "Operacional",
+        timestamp = DateTime.UtcNow,
+        endpoints = new
+        {
+            matriculas = "/api/matricula",
+            estudiantes = "/api/estudiante",
+            auth = "/api/auth",
+            health = "/health"
+        }
+    });
 });
 
 app.Run();
