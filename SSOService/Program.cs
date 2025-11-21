@@ -39,7 +39,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// CORS
+// En el Program.cs del SSO, actualiza CORS:
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
